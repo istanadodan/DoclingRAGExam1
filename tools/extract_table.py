@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from .load_file import docConverter
+from ..data_loader.load_file import docConverter
 
 
 def extract_and_export_tables(

@@ -1,20 +1,20 @@
-from langchain_core.prompts import PromptTemplate
 import os
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import VectorStore
-from langchain_milvus import Milvus
-from langchain_community.cross_encoders import HuggingFaceCrossEncoder
-from langchain.retrievers import ContextualCompressionRetriever
-from langchain.retrievers.document_compressors.cross_encoder_rerank import (
-    CrossEncoderReranker,
-)
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 import vertexai
-from vertexai.generative_models import GenerativeModel
-from langchain_core.embeddings import Embeddings
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from vertexai.generative_models._generative_models import GenerationResponse
+from db.vectordb import get_vectorstore, create_vectorstore
+from db.retrievers import get_retriever
+from model.llm_models import get_llm_model, get_embedding_model
+from enum_constant import VectorType
 
 vertexai.init(project=os.getenv("PROJECT_ID"), location=os.getenv("LOCATION"))
+
+
+async def create_db(file_info: str):
+    await create_vectorstore(file_info, get_embedding_model())
+    print(file_info)
+    return f"{file_info} : upload 완료"
 
 
 async def query(input_str: str) -> str:
@@ -43,11 +43,11 @@ async def query(input_str: str) -> str:
     # langfuse = Langfuse()
     # assert langfuse.auth_check()
 
-    vs = getVectorstore(embedding())
+    vs = get_vectorstore(VectorType.Milvus, get_embedding_model())
     if not vs:
         return f"Milvus 초기화 실패"
-    retriever = getRetriever(vs)
-    llm = getLLM()
+    retriever = get_retriever(vs)
+    llm = get_llm_model()
     rag_chain = (
         {
             "source": retriever,
@@ -74,104 +74,8 @@ def parse_protobuf_response(raw_response: GenerationResponse) -> str:
     return raw_response.text
 
 
-def getLLM():
-    model_kwargs = {
-        # temperature (float): The sampling temperature controls the degree of
-        # randomness in token selection.
-        "temperature": 0.28,
-        # max_output_tokens (int): The token limit determines the maximum amount of
-        # text output from one prompt.
-        "max_output_tokens": 1000,
-        # top_p (float): Tokens are selected from most probable to least until
-        # the sum of their probabilities equals the top-p value.
-        "top_p": 0.95,
-        # top_k (int): The next token is selected from among the top-k most
-        # probable tokens. This is not supported by all model versions. See
-        # https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/image-understanding#valid_parameter_values
-        # for details.
-        "top_k": None,
-        # safety_settings (Dict[HarmCategory, HarmBlockThreshold]): The safety
-        # settings to use for generating content.
-        # (you must create your safety settings using the previous step first).
-        # "safety_settings": safety_settings,
-    }
-    return GenerativeModel(
-        model_name=os.getenv("VERTEXAI_MODEL"),
-        generation_config=model_kwargs,
-        system_instruction="You are a helpful assistant.",
-    )
-
-
 def format_docs(docs: list[object]) -> str:
     result = ""
     for doc in docs:
         result += f"\\n\\n{doc.page_content}"
     return result
-
-
-def embedding() -> Embeddings:
-    # 임베딩 모델 초기화
-    model_name = os.getenv("EMBED_MODEL_ID")
-    embedding = HuggingFaceEmbeddings(
-        model_name=model_name, model_kwargs=dict(trust_remote_code=True)
-    )
-    return embedding
-
-
-def milvusVectorstore(_embedding: Embeddings):
-    """Milvus 벡터스토어 비동기-safe 생성 함수"""
-    return Milvus(
-        embedding_function=_embedding,
-        collection_name="docling_transformer",
-        connection_args={
-            "url": os.getenv("MILVUS_URI", "http://localhost:19530"),
-            "db_name": "edu",
-        },
-    )
-
-
-def createVectorstore(url: str, embedding: object) -> VectorStore:
-    """벡터스토 생성
-
-    Args:
-        url (str): 벡터DB url
-        embedding (object): 임배딩 인스턴스
-
-    Returns:
-        _type_: Vectorstore
-    """
-    from tools.load_file import lanchainFileLoader
-
-    return Milvus.from_documents(
-        documents=lanchainFileLoader(file_path=url),
-        embedding=embedding,
-        collection_name="docling_transformer",
-        connection_args={
-            "url": os.getenv("MILVUS_URI"),
-            "db_name": "edu",
-        },
-        index_params={"index_type": "FLAT", "metrics_type": "COSINE"},
-        drop_old=True,  # 기존 컬렉션 삭제
-    )
-
-
-def getVectorstore(embedding: object) -> VectorStore:
-    return milvusVectorstore(embedding)
-
-
-def getRetriever(vs: VectorStore):
-    base_retriever = vs.as_retriever(search_kwargs={"k": 5})
-
-    re_ranker = CrossEncoderReranker(
-        model=HuggingFaceCrossEncoder(
-            model_name=os.getenv("RERANKER_MODEL_ID"),
-            model_kwargs=dict(trust_remote_code=True),
-        ),
-        top_n=3,
-    )
-
-    cross_encoder_reranker_retriever = ContextualCompressionRetriever(
-        base_compressor=re_ranker, base_retriever=base_retriever
-    )
-
-    return cross_encoder_reranker_retriever

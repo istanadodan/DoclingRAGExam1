@@ -57,14 +57,21 @@ def extractDocs(url: str) -> List[DoclingDocument]:
     return docConverter().convert(url).document
 
 
-def getChunkedDocs(doc: List[str]) -> List[str]:
+def getChunkedDocs(docs: List[DoclingDocument]) -> List[str]:
     chunker = hybridChunker()
-    return list(chunker.chunk(doc))
+    return list(chunker.chunk(docs))
+
+
+def recursiveSplitDocuments(docs: List[Document]) -> List[DoclingDocument]:
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=250, chunk_overlap=50)
+    return splitter.split_documents(docs)
 
 
 def loadDocsFromUrl(url: str = "https://arxiv.org/pdf/2408.09869"):
     # print(result.document.export_to_markdown())
-    docs = extractDocs(url)
+    docs: List[DoclingDocument] = extractDocs(url)
 
     # 청크 목록 취득
     chunks: list = getChunkedDocs(docs)

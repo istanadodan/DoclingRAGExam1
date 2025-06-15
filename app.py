@@ -1,10 +1,12 @@
-import asyncio
 import streamlit as st
 import datetime
 import json
 import orjson
 import warnings
 from tools.async_tools import run_async
+
+# AI 응답 생성
+from model.query import query, create_db
 
 
 def setup() -> None:
@@ -18,14 +20,6 @@ def setup() -> None:
     milvus_logger.setLevel(logging.INFO)
 
     logging_logger.set_verbosity_error()
-
-
-def get_event_loop_safe():
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        # Streamlit처럼 실행 중 루프가 없을 때는 기본 루프 가져오기
-        return asyncio.get_event_loop()
 
 
 def main():
@@ -108,7 +102,9 @@ def main():
 
         if uploaded_file:
             for file in uploaded_file:
-                if file not in st.session_state.uploaded_files:
+                if file.name not in [
+                    ufile["name"] for ufile in st.session_state.uploaded_files
+                ]:
                     st.session_state.uploaded_files.append(
                         {
                             "name": file.name,
@@ -119,7 +115,6 @@ def main():
                             ),
                         }
                     )
-
             st.success(f"{len(uploaded_file)}개 파일이 업로드되었습니다!")
 
             # 업로드된 파일 목록 표시
@@ -133,7 +128,6 @@ def main():
                         if st.button(f"삭제", key=f"delete_{i}"):
                             st.session_state.uploaded_files.pop(i)
                             st.rerun()
-
         st.divider()
 
         # 대화 내역 관리
@@ -220,9 +214,12 @@ def main():
                 )
 
             with col_submit3:
-                include_files = st.checkbox(
-                    "업로드된 파일 포함", help="업로드된 파일 정보를 함께 전송합니다."
+                db_upload_submitted = st.form_submit_button(
+                    "DB업로드", use_container_width=False
                 )
+                # include_files = st.checkbox(
+                #     "업로드된 파일 포함", help="업로드된 파일 정보를 함께 전송합니다."
+                # )
 
     with col2:
         # 통계 및 정보 표시
@@ -249,36 +246,37 @@ def main():
             st.write(f"**최대 토큰:** {max_tokens}")
             st.write(f"**표시 이력:** {max_history}개")
 
-    # 폼 제출 처리
-    if submitted and user_input.strip():
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
+    # db업로드
+    if db_upload_submitted and st.session_state.uploaded_files:
         # 파일 정보 포함 여부 확인
-        file_context = ""
-        if include_files and st.session_state.uploaded_files:
-            file_context = "\n\n[업로드된 파일 정보]\n"
-            for file_info in st.session_state.uploaded_files:
-                file_context += f"- {file_info['name']} ({file_info['type']}, {file_info['size']:,} bytes)\n"
+        file_context = "\n\n[업로드된 파일 정보]\n"
+        for file_info in st.session_state.uploaded_files:
+            file_context += f"- {file_info['name']} ({file_info['type']}, {file_info['size']:,} bytes)\n"
 
-        # 실제 AI 모델 대신 간단한 응답 생성 (데모용)
-        def generate_response(user_query: str, model: str, temp: float) -> str:
-            responses = [
-                f"안녕하세요! {model} 모델로 답변드립니다. 질문: '{user_query[:50]}...' 에 대해 생각해보고 있습니다.",
-                f"흥미로운 질문이네요! {model}이 창의성 수준 {temp}로 답변을 생성하고 있습니다.",
-                f"질문을 잘 이해했습니다. {model} 모델의 최대 {max_tokens} 토큰으로 답변해드리겠습니다.",
-                f"좋은 질문입니다! {model}으로 분석한 결과를 말씀드리겠습니다.",
-                f"네, 도움을 드릴 수 있습니다. {model} 모델로 최선의 답변을 준비했습니다.",
-            ]
-            import random
+        # TODO:
+        ai_response = run_async(create_db(user_input))
 
-            return (
-                random.choice(responses)
-                + f"\n\n실제 구현에서는 여기에 {model} API 호출 결과가 표시됩니다."
-                + file_context
-            )
+        st.session_state.uploaded_files = []
 
-        # AI 응답 생성
-        from model.query import query
+    # 폼 제출 처리
+    elif submitted and user_input.strip():
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # # 실제 AI 모델 대신 간단한 응답 생성 (데모용)
+        # def generate_response(user_query: str, model: str, temp: float) -> str:
+        #     responses = [
+        #         f"안녕하세요! {model} 모델로 답변드립니다. 질문: '{user_query[:50]}...' 에 대해 생각해보고 있습니다.",
+        #         f"흥미로운 질문이네요! {model}이 창의성 수준 {temp}로 답변을 생성하고 있습니다.",
+        #         f"질문을 잘 이해했습니다. {model} 모델의 최대 {max_tokens} 토큰으로 답변해드리겠습니다.",
+        #         f"좋은 질문입니다! {model}으로 분석한 결과를 말씀드리겠습니다.",
+        #         f"네, 도움을 드릴 수 있습니다. {model} 모델로 최선의 답변을 준비했습니다.",
+        #     ]
+        #     import random
+
+        #     return (
+        #         random.choice(responses)
+        #         + f"\n\n실제 구현에서는 여기에 {model} API 호출 결과가 표시됩니다."
+        #         + file_context
+        #     )
 
         try:
             ai_response = run_async(query(user_input))
