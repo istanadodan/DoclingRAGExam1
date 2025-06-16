@@ -6,11 +6,13 @@ import os
 from pathlib import Path
 
 
-def get_milvus_vectorstore(_embedding: Embeddings) -> VectorStore:
+async def get_milvus_vectorstore(
+    collection_name: str, _embedding: Embeddings
+) -> VectorStore:
     """Milvus 벡터스토어 비동기-safe 생성 함수"""
     return Milvus(
         embedding_function=_embedding,
-        collection_name="docling_transformer",
+        collection_name=collection_name,
         connection_args={
             "url": os.getenv("MILVUS_URI", "http://localhost:19530"),
             "db_name": "edu",
@@ -41,11 +43,13 @@ async def create_vectorstore(file_path: Path, embedding: object) -> VectorStore:
             "db_name": "edu",
         },
         index_params={"index_type": "FLAT", "metric_type": "COSINE"},
-        drop_old=True,  # 기존 컬렉션 삭제
+        drop_old=False,  # 기존 컬렉션 유지
     )
 
 
-def get_vectorstore(type: VectorType, embedding: object) -> VectorStore:
+async def get_vectorstore(
+    type: VectorType, collection_name: str, embedding: object
+) -> VectorStore:
     if type == VectorType.Milvus:
-        return get_milvus_vectorstore(embedding)
+        return await get_milvus_vectorstore(collection_name, embedding)
     return None

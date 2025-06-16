@@ -26,10 +26,12 @@ default_model_kwargs = {
 }
 
 
-def get_llm_model(model_kwargs: dict = None):
-    _kwargs = model_kwargs or default_model_kwargs
+def get_llm_model(model_name: str, temperature: float = 0.7):
+    _kwargs = default_model_kwargs
+    _kwargs["temperature"] = temperature
+
     return GenerativeModel(
-        model_name=os.getenv("VERTEXAI_MODEL"),
+        model_name=os.getenv(model_name),
         generation_config=_kwargs,
         system_instruction="You are a helpful assistant.",
     )

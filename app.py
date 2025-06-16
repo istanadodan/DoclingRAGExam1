@@ -1,12 +1,32 @@
 import streamlit as st
+import os
 import datetime
-import json
 import orjson
 import warnings
 from tools.async_tools import run_async
+from db import MilvusVectorStorePool
+from model import get_embedding_model, get_llm_model
 
 # AI 응답 생성
 from model.query import query, create_db
+
+
+@st.cache_resource
+def get_llm(model_name: str, temperature: float = 0.7):
+    return get_llm_model(model_name=model_name, temperature=temperature)
+
+
+@st.cache_resource
+def get_embedding_function():
+    return get_embedding_model()
+
+
+@st.cache_resource
+def create_pool():
+    return MilvusVectorStorePool(
+        embedding_function=get_embedding_function(),
+        collection_names=["chat_history", "docling_transformer"],
+    )
 
 
 def setup() -> None:
@@ -42,6 +62,9 @@ def main():
     # 페이지 설정
     st.set_page_config(page_title="AI 채팅 어시스턴트", page_icon="💬", layout="wide")
 
+    # db con pool
+    vs_pool = create_pool()
+
     # 세션 상태 초기화
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
@@ -54,7 +77,22 @@ def main():
 
     # 사이드바 - 옵션 설정
     with st.sidebar:
+
+        # 모델 옵션 선택
         st.header("⚙️ 설정")
+        col_select1, col_select2 = st.columns([1, 1])
+
+        with col_select1:
+            model_option = st.selectbox(
+                "AI 모델",
+                ["GPT-4", "GPT-3.5-turbo", "Claude-3", "Gemini-2.0-flash"],
+                index=3,
+            )
+        with col_select2:
+            # 컬렉션 선택
+            collection_name = st.selectbox("업무구분", "docling_transformer", index=0)
+
+        st.divider()
 
         # 대화 이력 개수 설정
         max_history = st.slider(
@@ -64,16 +102,6 @@ def main():
             value=20,
             step=5,
             help="최근 몇 개의 대화까지 표시할지 설정합니다.",
-        )
-
-        st.divider()
-
-        # 모델 옵션 선택
-        st.subheader("🤖 모델 설정")
-        model_option = st.selectbox(
-            "AI 모델 선택",
-            ["GPT-4", "GPT-3.5-turbo", "Claude-3", "Gemini-Pro"],
-            index=0,
         )
 
         temperature = st.slider(
@@ -89,45 +117,6 @@ def main():
             "최대 토큰 수", min_value=100, max_value=4000, value=2000, step=100
         )
 
-        st.divider()
-
-        # 파일 업로드 섹션
-        st.subheader("📁 파일 업로드")
-        uploaded_file = st.file_uploader(
-            "파일을 선택하세요",
-            type=["txt", "pdf", "docx", "csv", "json", "py", "md"],
-            accept_multiple_files=True,
-            help="텍스트, PDF, Word, CSV, JSON, Python, Markdown 파일을 업로드할 수 있습니다.",
-        )
-
-        if uploaded_file:
-            for file in uploaded_file:
-                if file.name not in [
-                    ufile["name"] for ufile in st.session_state.uploaded_files
-                ]:
-                    st.session_state.uploaded_files.append(
-                        {
-                            "name": file.name,
-                            "size": file.size,
-                            "type": file.type,
-                            "upload_time": datetime.datetime.now().strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            ),
-                        }
-                    )
-            st.success(f"{len(uploaded_file)}개 파일이 업로드되었습니다!")
-
-            # 업로드된 파일 목록 표시
-            if st.session_state.uploaded_files:
-                st.write("**업로드된 파일들:**")
-                for i, file_info in enumerate(st.session_state.uploaded_files):
-                    with st.expander(f"📄 {file_info['name']}"):
-                        st.write(f"크기: {file_info['size']:,} bytes")
-                        st.write(f"타입: {file_info['type']}")
-                        st.write(f"업로드 시간: {file_info['upload_time']}")
-                        if st.button(f"삭제", key=f"delete_{i}"):
-                            st.session_state.uploaded_files.pop(i)
-                            st.rerun()
         st.divider()
 
         # 대화 내역 관리
@@ -163,63 +152,110 @@ def main():
     col1, col2 = st.columns([3, 1])
 
     with col1:
-        # 채팅 기록 표시 영역
-        st.subheader("💭 대화창")
 
-        chat_container = st.container()
-
-        with chat_container:
-            # 최근 대화 이력만 표시
-            display_history = (
-                st.session_state.chat_history[-max_history:]
-                if len(st.session_state.chat_history) > max_history
-                else st.session_state.chat_history
-            )
-
-            if not display_history:
-                st.info("👋 안녕하세요! 무엇을 도와드릴까요?")
-            else:
-                for i, chat in enumerate(display_history):
-                    timestamp = chat.get("timestamp", "")
-
-                    # 사용자 메시지
-                    with st.chat_message("user"):
-                        st.write(f"**[{timestamp}]**")
-                        st.write(chat["user"])
-
-                    # AI 응답
-                    with st.chat_message("assistant"):
-                        st.write(f"**[{timestamp}] {model_option}**")
-                        st.write(chat["assistant"])
-
-        # 질의 입력창
-        st.subheader("✍️ 질문 입력")
-
-        with st.form("chat_form", clear_on_submit=True):
-            user_input = st.text_area(
-                "메시지를 입력하세요:",
-                height=100,
-                placeholder="여기에 질문을 입력하세요...",
-                help="Ctrl+Enter로 빠르게 전송할 수 있습니다.",
-            )
-
-            col_submit1, col_submit2, col_submit3 = st.columns([1, 1, 2])
-
-            with col_submit1:
-                submitted = st.form_submit_button("🚀 전송", use_container_width=True)
-
-            with col_submit2:
-                clear_input = st.form_submit_button(
-                    "🧹 지우기", use_container_width=True
+        tab1, tab2 = st.tabs(["💬 채팅창", "📁 업로드창"])
+        with tab1:
+            # 질의 입력창
+            st.subheader("✍️ 질문 입력")
+            with st.form("chat_form", clear_on_submit=True):
+                user_input = st.text_area(
+                    "메시지를 입력하세요:",
+                    height=100,
+                    placeholder="여기에 질문을 입력하세요...",
+                    help="Ctrl+Enter로 빠르게 전송할 수 있습니다.",
                 )
 
-            with col_submit3:
+                col_submit1, col_submit2, _ = st.columns([1, 1, 2])
+
+                with col_submit1:
+                    submitted = st.form_submit_button(
+                        "🚀 전송", use_container_width=True
+                    )
+
+                with col_submit2:
+                    clear_input = st.form_submit_button(
+                        "🧹 지우기", use_container_width=True
+                    )
+
+            # 채팅 기록 표시 영역
+            st.subheader("💭 대화창")
+            chat_container = st.container()
+            with chat_container:
+                # 최근 대화 이력만 표시
+                display_history = (
+                    st.session_state.chat_history[-max_history:]
+                    if len(st.session_state.chat_history) > max_history
+                    else st.session_state.chat_history
+                )
+
+                if not display_history:
+                    st.info("👋 안녕하세요! 무엇을 도와드릴까요?")
+                else:
+                    for i, chat in enumerate(display_history[::-1]):
+                        timestamp = chat.get("timestamp", "")
+
+                        # 사용자 메시지
+                        with st.chat_message("user"):
+                            st.write(f"**[{timestamp}]**")
+                            st.write(chat["user"])
+
+                        # AI 응답
+                        with st.chat_message("assistant"):
+                            st.write(f"**[{timestamp}] {model_option}**")
+                            st.write(chat["assistant"])
+
+        with tab2:
+            st.subheader("📁 파일 업로드")
+
+            with st.form("upload_form", clear_on_submit=True):
+                collection_name = st.text_input(
+                    "업무구분명을 입력하세요:",
+                    placeholder="여기에 구분명을 입력하세요...",
+                    help="Ctrl+Enter로 빠르게 전송할 수 있습니다.",
+                )
+
                 db_upload_submitted = st.form_submit_button(
                     "DB업로드", use_container_width=False
                 )
-                # include_files = st.checkbox(
-                #     "업로드된 파일 포함", help="업로드된 파일 정보를 함께 전송합니다."
-                # )
+
+            uploaded_file = st.file_uploader(
+                "파일을 선택하세요",
+                type=["txt", "pdf", "docx", "csv", "json", "py", "md"],
+                accept_multiple_files=True,
+                help="텍스트, PDF, Word, CSV, JSON, Python, Markdown 파일을 업로드할 수 있습니다.",
+            )
+
+            if uploaded_file:
+                for file in uploaded_file:
+                    # 파일 저장
+                    save_file_to("./uploads", file)
+                    if file.name not in [
+                        ufile["name"] for ufile in st.session_state.uploaded_files
+                    ]:
+                        st.session_state.uploaded_files.append(
+                            {
+                                "name": file.name,
+                                "size": file.size,
+                                "type": file.type,
+                                "upload_time": datetime.datetime.now().strftime(
+                                    "%Y-%m-%d %H:%M:%S"
+                                ),
+                            }
+                        )
+                st.success(f"{len(uploaded_file)}개 파일이 업로드되었습니다!")
+
+                # 업로드된 파일 목록 표시
+                if st.session_state.uploaded_files:
+                    st.write("**업로드된 파일목록:**")
+                    for i, file_info in enumerate(st.session_state.uploaded_files):
+                        with st.expander(f"📄 {file_info['name']}"):
+                            st.write(f"크기: {file_info['size']:,} bytes")
+                            st.write(f"타입: {file_info['type']}")
+                            st.write(f"업로드 시간: {file_info['upload_time']}")
+                            if st.button(f"삭제", key=f"delete_{i}"):
+                                st.session_state.uploaded_files.pop(i)
+                                st.rerun()
+            st.divider()
 
     with col2:
         # 통계 및 정보 표시
@@ -258,7 +294,6 @@ def main():
 
         st.session_state.uploaded_files = []
 
-    # 폼 제출 처리
     elif submitted and user_input.strip():
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         # # 실제 AI 모델 대신 간단한 응답 생성 (데모용)
@@ -277,9 +312,14 @@ def main():
         #         + f"\n\n실제 구현에서는 여기에 {model} API 호출 결과가 표시됩니다."
         #         + file_context
         #     )
-
         try:
-            ai_response = run_async(query(user_input))
+            ai_response = query(
+                user_input,
+                collection_name,
+                llm=get_llm(model_name=model_option),
+                embedding_function=get_embedding_function(),
+                vs_pool=vs_pool,
+            )
         except RuntimeError:
             ai_response = "ERROR"
 
@@ -320,5 +360,29 @@ def main():
         )
 
 
+def setup() -> None:
+    from transformers import logging as logging_logger
+    import logging
+
+    # Milvus 로거만 대상으로 설정 (패키지 이름 확인 필요)
+    milvus_logger = logging.getLogger(
+        "milvus"
+    )  # 또는 "pymilvus", "async_milvus_client"
+    milvus_logger.setLevel(logging.INFO)
+
+    logging_logger.set_verbosity_error()
+
+
+def save_file_to(dir_path: str, file: object) -> None:
+    save_path = os.path.join(dir_path, "pdf")
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+
+    with open(os.path.join(save_path, file.name), "wb") as f:
+        f.write(file.getbuffer())
+    st.success(f"{file.name}파일이 {save_path}에 저장되었습니다")
+
+
 if __name__ == "__main__":
+    setup()
     main()
