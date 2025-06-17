@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Dict
 import vertexai
 from langchain_core.prompts import PromptTemplate
@@ -14,10 +15,22 @@ from langchain_core.embeddings import Embeddings
 vertexai.init(project=os.getenv("PROJECT_ID"), location=os.getenv("LOCATION"))
 
 
-async def create_db(file_info: str):
-    await create_vectorstore(file_info, get_embedding_model())
-    print(file_info)
-    return f"{file_info} : upload 완료"
+async def create_url_db(collection_name: str, url: str, embedding_function):
+    from data_loader.web_data_loader import langchainWebLoader
+
+    docs = await langchainWebLoader(url)
+    create_vectorstore(collection_name, docs, embedding_function)
+    return f"{url} : upload 완료"
+
+
+async def create_file_db(collection_name: str, file_path: Path, embedding_function):
+    from data_loader.web_data_loader import langchainWebLoader
+
+    from data_loader.load_file import lanchainFileLoader
+
+    docs = await lanchainFileLoader(file_path)
+    create_vectorstore(collection_name, docs, embedding_function)
+    return f"{file_path.name} : upload 완료"
 
 
 def query(

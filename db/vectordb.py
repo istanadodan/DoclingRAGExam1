@@ -1,9 +1,9 @@
+from typing import List
 from langchain_milvus import Milvus
 from langchain_core.embeddings import Embeddings
 from enum_constant import *
 from langchain_community.vectorstores import VectorStore
 import os
-from pathlib import Path
 
 
 async def get_milvus_vectorstore(
@@ -21,23 +21,25 @@ async def get_milvus_vectorstore(
     )
 
 
-async def create_vectorstore(file_path: Path, embedding: object) -> VectorStore:
+def create_vectorstore(
+    collection_name: str, docs: List[str], embedding_function: Embeddings
+) -> VectorStore:
     """벡터스토 생성
 
     Args:
-        url (str): 벡터DB url
-        embedding (object): 임배딩 인스턴스
+        docs (str): 텍스트 목록
+        embedding_function (object): 임배딩 인스턴스
 
     Returns:
         _type_: Vectorstore
     """
-    from data_loader.load_file import lanchainFileLoader
-    from data_loader.web_data_loader import langchainWebLoader
-
+    if len(docs) == 0:
+        # return get_milvus_vectorstore(collection_name, embedding_function)
+        return
     return Milvus.from_documents(
-        documents=await langchainWebLoader(url=file_path),
-        embedding=embedding,
-        collection_name="docling_transformer",
+        documents=docs,
+        embedding=embedding_function,
+        collection_name=collection_name,
         connection_args={
             "url": os.getenv("MILVUS_URI", "http://localhost:19530"),
             "db_name": "edu",

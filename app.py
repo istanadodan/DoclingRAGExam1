@@ -4,11 +4,8 @@ import datetime
 import orjson
 import warnings
 from tools.async_tools import run_async
-from db import MilvusVectorStorePool
-from model import get_embedding_model, get_llm_model
-
-# AI 응답 생성
-from model.query import query, create_db
+from db import *
+from model import *
 
 
 @st.cache_resource
@@ -25,7 +22,7 @@ def get_embedding_function():
 def create_pool():
     return MilvusVectorStorePool(
         embedding_function=get_embedding_function(),
-        collection_names=["chat_history", "docling_transformer"],
+        collection_names=["chat_history", "docling_transformer", "ai_agents"],
     )
 
 
@@ -90,7 +87,9 @@ def main():
             )
         with col_select2:
             # 컬렉션 선택
-            collection_name = st.selectbox("업무구분", "docling_transformer", index=0)
+            collection_name = st.selectbox(
+                "업무구분", ["docling_transformer", "ai_agents"], index=0
+            )
 
         st.divider()
 
@@ -153,7 +152,7 @@ def main():
 
     with col1:
 
-        tab1, tab2 = st.tabs(["💬 채팅창", "📁 업로드창"])
+        tab1, tab2, tab3 = st.tabs(["💬 채팅창", "📁 업로드창", "🛖 WEB-URL"])
         with tab1:
             # 질의 입력창
             st.subheader("✍️ 질문 입력")
@@ -208,7 +207,7 @@ def main():
             st.subheader("📁 파일 업로드")
 
             with st.form("upload_form", clear_on_submit=True):
-                collection_name = st.text_input(
+                collection_name1_ = st.text_input(
                     "업무구분명을 입력하세요:",
                     placeholder="여기에 구분명을 입력하세요...",
                     help="Ctrl+Enter로 빠르게 전송할 수 있습니다.",
@@ -257,6 +256,25 @@ def main():
                                 st.rerun()
             st.divider()
 
+        with tab3:
+            st.subheader("📁 URL 업로드")
+
+            with st.form("웹URL", clear_on_submit=True):
+                collection_name2_ = st.text_input(
+                    "업무구분명을 입력하세요:",
+                    placeholder="여기에 구분명을 입력하세요...",
+                    help="Ctrl+Enter로 빠르게 전송할 수 있습니다.",
+                )
+                web_url = st.text_input(
+                    "웹주소를 입력하세요:",
+                    placeholder="여기에 주소를 입력하세요...",
+                    help="Ctrl+Enter로 빠르게 전송할 수 있습니다.",
+                )
+
+                url_upload_submitted = st.form_submit_button(
+                    "url 업로드", use_container_width=False
+                )
+
     with col2:
         # 통계 및 정보 표시
         st.subheader("📊 대화 통계")
@@ -283,6 +301,15 @@ def main():
             st.write(f"**표시 이력:** {max_history}개")
 
     # db업로드
+    if url_upload_submitted and web_url:
+        ai_response = run_async(
+            create_url_db(
+                collection_name2_,
+                web_url,
+                get_embedding_function(),
+            )
+        )
+
     if db_upload_submitted and st.session_state.uploaded_files:
         # 파일 정보 포함 여부 확인
         file_context = "\n\n[업로드된 파일 정보]\n"
@@ -290,7 +317,13 @@ def main():
             file_context += f"- {file_info['name']} ({file_info['type']}, {file_info['size']:,} bytes)\n"
 
         # TODO:
-        ai_response = run_async(create_db(user_input))
+        ai_response = run_async(
+            create_file_db(
+                collection_name1_,
+                user_input,
+                get_embedding_function(),
+            )
+        )
 
         st.session_state.uploaded_files = []
 

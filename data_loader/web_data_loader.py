@@ -20,7 +20,8 @@ async def web_loader(page_url: str = page_url_default) -> List[Document]:
         web_path=page_url,
         bs_kwargs={
             "parse_only": bs4.SoupStrainer(
-                class_="entry-content wp-block-post-content is-layout-constrained wp-block-post-content-is-layout-constrained",
+                # class_="entry-content wp-block-post-content is-layout-constrained wp-block-post-content-is-layout-constrained",
+                class_="relative grow box-border flex-col w-full mx-auto px-1 lg:pl-[23.7rem] lg:-ml-12 xl:w-[calc(100%-28rem)]",
             ),
         },
         # 텍스트를 추출할 때 구분자를 설정하고 공백을 제거
